@@ -18,6 +18,7 @@ typedef struct student{
    sem_t student_sleeping;
 }student;
 
+sem_t chair_mutex, q_mutex;
 
 int main(int argc, char *argv[]){
     if(argc == 4){
