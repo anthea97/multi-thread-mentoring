@@ -13,7 +13,7 @@
 #include <semaphore.h>
 #include <assert.h>
 
-sem_t chair_mutex, q_mutex, queue_fill;
+sem_t chair_mutex, q_mutex, queue_fill, tutor_waiting;
 int total_chairs, max_help, chairs_avail, total_students;
 
 /* For Student */
@@ -30,7 +30,7 @@ int rear = -1;
 int front = -1;
 student *coord_queue;
 void add(student st);
-void delete();
+student* pop();
 
 
 /* Student Thread Routine */
@@ -88,7 +88,23 @@ Sleep(0.2ms)
 }
 
 void coord_routine() {
+    student* curr_student;
 
+    while(1){
+    //should wait for Queue to fill up
+    sem_wait(queue_fill);
+    //Remove student from queue (FCFS)
+    sem_wait(&q_mutex);
+    curr_student = pop();
+    sem_post(&q_mutex);
+    //Add student to Tutor MLPQ
+    //MLPQ[curr_student.nhelps].addatend()
+
+    //Notify tutor that student is waiting
+    //sem_post(tutor_waiting);
+    }
+
+}
 
 }
 
@@ -146,12 +162,17 @@ void add(student st) {
     }
 }
 
-void delete() {
+student* pop() {
+    student* st;
     if (front == -1 || front > rear) {
         printf("Queue Underflow n");
-        return;
+        return NULL;
     } else {
+        st = &coord_queue[front];
         printf("Element deleted from queue is : %dn", coord_queue[front].student_ID);
         front = front + 1;
+        return st;
     }
+
 }
+
