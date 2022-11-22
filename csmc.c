@@ -106,7 +106,6 @@ void coord_routine() {
 
 }
 
-}
 
 int main(int argc, char *argv[]) {
     pthread_t *student_thread;
