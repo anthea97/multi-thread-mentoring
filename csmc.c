@@ -28,16 +28,17 @@ student *stu_arr;
 sem_t *student_sleeping;
 
 /* For Coordinator Queue */
-int rear = -1;
-int front = -1;
-student *coord_queue;
+int rear = 0;
+int front = 0;
+int *coord_queue;
 
-void add(student st);
+void add(int studentID);
 
-student *pop();
+int pop();
 
 /* Student Thread Routine */
-void student_routine(student *curr_student) {
+void student_routine(int studentID) {
+    student *curr_student = &stu_arr[studentID];
 #ifdef DEBUG
     printf("student_routine started for %d\n", curr_student->student_ID);
 #endif
@@ -55,7 +56,7 @@ void student_routine(student *curr_student) {
 
             //add self to coordinator Queue
             sem_wait(&q_mutex);
-            add(*curr_student);
+            add(curr_student->student_ID);
             sem_post(&q_mutex);
             //Inform coordinator that queue is not empty
             sem_post(&queue_fill);
@@ -101,19 +102,26 @@ void coord_routine() {
 #endif
     student *curr_student;
 
-//    while (1) {
-//        //should wait for Queue to fill up
-//        sem_wait(queue_fill);
-//        //Remove student from queue (FCFS)
-//        sem_wait(&q_mutex);
-//        curr_student = pop();
-//        sem_post(&q_mutex);
-//        //Add student to Tutor MLPQ
-//        //MLPQ[curr_student.nhelps].addatend()
-//
-//        //Notify tutor that student is waiting
-//        //sem_post(tutor_waiting);
-//    }
+    while (1) {
+        //should wait for Queue to fill up
+        sem_wait(&queue_fill);
+        //Remove student from queue (FCFS)
+        sem_wait(&q_mutex);
+        int studentID = pop();
+        sem_post(&q_mutex);
+
+        curr_student = &stu_arr[studentID];
+        sem_wait(&chair_mutex);
+        // TODO: Total requests
+        printf("C: Student %d with priority %d added to the queue. Waiting students now = %d. Total requests = 0\n",
+               curr_student->student_ID, curr_student->num_helps, total_chairs - chairs_avail);
+        sem_post(&chair_mutex);
+        //Add student to Tutor MLPQ
+        //MLPQ[curr_student.nhelps].addatend()
+
+        //Notify tutor that student is waiting
+        //sem_post(tutor_waiting);
+    }
 }
 
 
@@ -130,6 +138,11 @@ int main(int argc, char *argv[]) {
         chairs_avail = total_chairs;
         max_help = atoi(argv[4]);
 
+        sem_init(&chair_mutex, 0, 1);
+        sem_init(&q_mutex, 0, 1);
+        sem_init(&queue_fill, 0, 0);
+        sem_init(&tutor_waiting, 0, 0);
+
 #ifdef DEBUG
         printf("students: %d, tutors: %d, total_chairs: %d, max_help: %d\n", n, m, total_chairs, max_help);
 #endif
@@ -139,7 +152,7 @@ int main(int argc, char *argv[]) {
         assert(stu_arr != NULL);
         student_sleeping = (sem_t *) malloc(n * sizeof(sem_t));
         assert(student_sleeping != NULL);
-        coord_queue = (student *) malloc(n * sizeof(student));
+        coord_queue = (int *) malloc(total_chairs * sizeof(int));
         assert(coord_queue != NULL);
         student_thread = malloc(sizeof(pthread_t) * n);
         assert(student_thread != NULL);
@@ -154,10 +167,12 @@ int main(int argc, char *argv[]) {
         assert(pthread_create(&coord_thread, NULL, (void *(*)(void *)) coord_routine, NULL) == 0);
         //Create student threads
         for (i = 0; i < n; i++) {
+            sem_init(&student_sleeping[i], 0, 0);
             student *s = &stu_arr[i];
             s->student_ID = i;
             s->num_helps = 0;
-            assert(pthread_create(&student_thread[i], NULL, (void *(*)(void *)) student_routine, (void *) s) == 0);
+            assert(pthread_create(&student_thread[i], NULL, (void *(*)(void *)) student_routine,
+                                  (void *) (uintptr_t) i) == 0);
         }
         //Create tutor threads
         for (j = 0; j < m; j++) {
@@ -187,31 +202,22 @@ int main(int argc, char *argv[]) {
 
 /* Coordinator Queue Helper Functions */
 
-void add(student st) {
-    if (rear == total_students - 1)
+void add(int studentID) {
+    student *st = &stu_arr[studentID];
 #ifdef DEBUG
-        printf("Queue Overflow\n");
+    printf("Inserting student %d in queue at position %d\n", st->student_ID, rear);
 #endif
-    else {
-        if (front == -1)
-            front = 0;
-        printf("Inserting student %d in queue\n", st.student_ID);
-        rear = rear + 1;
-        coord_queue[rear] = st;
-    }
+    coord_queue[rear] = studentID;
+    rear = (rear + 1) % total_chairs;
 }
 
-student *pop() {
-    student *st;
-    if (front == -1 || front > rear) {
+int pop() {
+    int studentID = coord_queue[front];
+    student *st = &stu_arr[studentID];
+
 #ifdef DEBUG
-        printf("Queue Underflow\n");
+    printf("Student deleted from queue is %d from position %d\n", st->student_ID, front);
 #endif
-        return NULL;
-    } else {
-        st = &coord_queue[front];
-        printf("Student deleted from queue is %d\n", coord_queue[front].student_ID);
-        front = front + 1;
-        return st;
-    }
+    front = (front + 1) % total_chairs;
+    return studentID;
 }
