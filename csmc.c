@@ -7,47 +7,50 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/wait.h>
+//#include <sys/wait.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <assert.h>
 
+#define DEBUG
+
 sem_t chair_mutex, q_mutex, queue_fill, tutor_waiting;
 int total_chairs, max_help, chairs_avail, total_students;
 
 /* For Student */
-typedef struct student{
-   int student_ID;
-   int num_helps;
-}student;
+typedef struct student {
+    int student_ID;
+    int num_helps;
+} student;
 
 student *stu_arr;
-sem_t *student_sleeping[];
+sem_t *student_sleeping;
 
 /* For Coordinator Queue */
 int rear = -1;
 int front = -1;
 student *coord_queue;
-void add(student st);
-student* pop();
 
+void add(student st);
+
+student *pop();
 
 /* Student Thread Routine */
-void student_routine(int id) {
-    student *curr_student;
-    curr_student = &stu_arr[id];
-    curr_student->student_ID = id;
-    curr_student->num_helps = 0;
+void student_routine(student *curr_student) {
+#ifdef DEBUG
+    printf("student_routine started for %d\n", curr_student->student_ID);
+#endif
 
     while (1) {
         if (curr_student->num_helps == max_help) {
             break;
         }
-        if (chairs_avail < total_chairs) {
+        if (chairs_avail <= total_chairs && chairs_avail > 0) {
             // occupy chair
             sem_wait(&chair_mutex);
             chairs_avail--;
+            printf("S: Student %d takes a seat. Empty chairs = %d.\n", curr_student->student_ID, chairs_avail);
             sem_post(&chair_mutex);
 
             //add self to coordinator Queue
@@ -58,13 +61,15 @@ void student_routine(int id) {
             sem_post(&queue_fill);
 
             // wait to be woken up for tutoring
-            sem_wait(student_sleeping[id]);
+            sem_wait(student_sleeping[curr_student->student_ID]);
             //Once woken up, get tutored
             curr_student->num_helps++;
             sleep(2000);
 
         } else {
             //do programming
+            // TODO: Random upto 2ms
+            printf("S: Student %d found no empty chair. Will try again later.\n", curr_student->student_ID);
             sleep(20);
         }
 
@@ -72,7 +77,10 @@ void student_routine(int id) {
 
 }
 
-void tutor_routine() {
+void tutor_routine(int id) {
+#ifdef DEBUG
+    printf("student_routine started for %d\n", id);
+#endif
 /*
  * While(1){
 //Wait for Tutor PQ to be filled
@@ -88,22 +96,24 @@ Sleep(0.2ms)
 }
 
 void coord_routine() {
-    student* curr_student;
+#ifdef DEBUG
+    printf("coord_routine started\n");
+#endif
+    student *curr_student;
 
-    while(1){
-    //should wait for Queue to fill up
-    sem_wait(queue_fill);
-    //Remove student from queue (FCFS)
-    sem_wait(&q_mutex);
-    curr_student = pop();
-    sem_post(&q_mutex);
-    //Add student to Tutor MLPQ
-    //MLPQ[curr_student.nhelps].addatend()
-
-    //Notify tutor that student is waiting
-    //sem_post(tutor_waiting);
-    }
-
+//    while (1) {
+//        //should wait for Queue to fill up
+//        sem_wait(queue_fill);
+//        //Remove student from queue (FCFS)
+//        sem_wait(&q_mutex);
+//        curr_student = pop();
+//        sem_post(&q_mutex);
+//        //Add student to Tutor MLPQ
+//        //MLPQ[curr_student.nhelps].addatend()
+//
+//        //Notify tutor that student is waiting
+//        //sem_post(tutor_waiting);
+//    }
 }
 
 
@@ -113,33 +123,62 @@ int main(int argc, char *argv[]) {
     pthread_t coord_thread;
     int n, m, i, j;
 
-    if (argc == 4) {
-        n = atoi(argv[0]); //Number of students
-        m = atoi(argv[1]); //Number of tutors
-        total_chairs = atoi(argv[2]);
-        max_help = atoi(argv[3]);
+    if (argc == 5) {
+        n = atoi(argv[1]); //Number of students
+        m = atoi(argv[2]); //Number of tutors
+        total_chairs = atoi(argv[3]);
+        chairs_avail = total_chairs;
+        max_help = atoi(argv[4]);
+
+#ifdef DEBUG
+        printf("students: %d, tutors: %d, total_chairs: %d, max_help: %d\n", n, m, total_chairs, max_help);
+#endif
+
         total_students = n;
         stu_arr = (student *) malloc(n * sizeof(student));
+        assert(stu_arr != NULL);
+        student_sleeping = (sem_t *) malloc(n * sizeof(sem_t));
+        assert(student_sleeping != NULL);
         coord_queue = (student *) malloc(n * sizeof(student));
-
+        assert(coord_queue != NULL);
         student_thread = malloc(sizeof(pthread_t) * n);
+        assert(student_thread != NULL);
         tutor_thread = malloc(sizeof(pthread_t) * m);
+        assert(tutor_thread != NULL);
+
+#ifdef DEBUG
+        printf("stu_arr, student_sleeping, coord_queue, student_thread, tutor_thread malloc\n");
+#endif
 
         //Create coordinator thread
-        assert(pthread_create(&coord_thread[i], NULL, coord_routine, (void *) i) == 0);
-
+        assert(pthread_create(&coord_thread, NULL, (void *(*)(void *)) coord_routine, NULL) == 0);
         //Create student threads
         for (i = 0; i < n; i++) {
-            assert(pthread_create(&student_thread[i], NULL, student_routine, (void *) i) == 0);
+            student *s = &stu_arr[i];
+            s->student_ID = i;
+            s->num_helps = 0;
+            assert(pthread_create(&student_thread[i], NULL, (void *(*)(void *)) student_routine, (void *) s) == 0);
         }
-
         //Create tutor threads
         for (j = 0; j < m; j++) {
-            assert(pthread_create(&tutor_thread[j], NULL, tutor_routine, (void *) j) == 0);
+            assert(pthread_create(&tutor_thread[j], NULL, (void *(*)(void *)) tutor_routine, (void *) (uintptr_t) j) ==
+                   0);
         }
 
+        // Wait for coordinator thread
+        assert(pthread_join(coord_thread, NULL) == 0);
+        // Wait for student threads
+        for (i = 0; i < n; i++) {
+            assert(pthread_join(student_thread[i], NULL) == 0);
+        }
+        // Wait for tutor threads
+        for (j = 0; j < m; j++) {
+            assert(pthread_join(tutor_thread[j], NULL) == 0);
+        }
     } else {
+#ifdef DEBUG
         printf("Wrong number of arguments");
+#endif
         exit(-1);
     }
 
@@ -150,28 +189,29 @@ int main(int argc, char *argv[]) {
 
 void add(student st) {
     if (rear == total_students - 1)
-        printf("Queue Overflow n");
+#ifdef DEBUG
+        printf("Queue Overflow\n");
+#endif
     else {
         if (front == -1)
             front = 0;
-        printf("Insert student %d in queue : ", st.student_ID);
-        scanf("%d", &st);
+        printf("Inserting student %d in queue\n", st.student_ID);
         rear = rear + 1;
         coord_queue[rear] = st;
     }
 }
 
-student* pop() {
-    student* st;
+student *pop() {
+    student *st;
     if (front == -1 || front > rear) {
-        printf("Queue Underflow n");
+#ifdef DEBUG
+        printf("Queue Underflow\n");
+#endif
         return NULL;
     } else {
         st = &coord_queue[front];
-        printf("Element deleted from queue is : %dn", coord_queue[front].student_ID);
+        printf("Student deleted from queue is %d\n", coord_queue[front].student_ID);
         front = front + 1;
         return st;
     }
-
 }
-
