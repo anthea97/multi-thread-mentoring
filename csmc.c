@@ -16,8 +16,8 @@
 
 //#define DEBUG
 
-sem_t chair_mutex, q_mutex, queue_fill, tutor_waiting, waiting_students_sem;
-int total_chairs, max_help, chairs_avail, total_students, waiting_students, total_requests;
+sem_t chair_mutex, q_mutex, queue_fill, waiting_students_sem;
+int total_chairs, max_help, chairs_avail, total_students, waiting_students, total_requests, tutor_rr, total_tutors;
 
 /* For Student */
 typedef struct student {
@@ -26,7 +26,7 @@ typedef struct student {
 } student;
 
 student *stu_arr;
-sem_t *student_sleeping;
+sem_t *student_sleeping, *tutor_waiting;
 
 /* For Coordinator Queue */
 int rear = 0;
@@ -85,17 +85,18 @@ void tutor_routine(int id) {
     printf("tutor_routine started for %d\n", id);
 #endif
 
-//    while (1) {
-//        //Wait for Tutor PQ to be filled
-//        sem_wait(&tutor_waiting);
-//
+    while (1) {
+        //Wait for Tutor PQ to be filled
+        sem_wait(&tutor_waiting[id]);
+        printf("WOKEEE %d\n", id);
+
 //        //Remove student with highest priority from MLPQ
 //        sem_post(&student_sleeping[0]);
 //        printf("T: Student %d tutored by Tutor %d", 0, id);
 //
 //        //Tutor student
-//        sleep(2);
-//    }
+        sleep(2);
+    }
 }
 
 void coord_routine() {
@@ -114,7 +115,6 @@ void coord_routine() {
 
         curr_student = &stu_arr[studentID];
         sem_wait(&waiting_students_sem);
-        // TODO: Total requests
         waiting_students += 1;
         total_requests += 1;
         printf("C: Student %d with priority %d added to the queue. Waiting students now = %d. Total requests = %d\n",
@@ -124,7 +124,9 @@ void coord_routine() {
         //MLPQ[curr_student.nhelps].addatend()
 
         //Notify tutor that student is waiting
-        sem_post(&tutor_waiting);
+        int next_tutor = tutor_rr;
+        tutor_rr = (tutor_rr + 1) % total_tutors;
+        sem_post(&tutor_waiting[next_tutor]);
     }
 }
 
@@ -144,11 +146,11 @@ int main(int argc, char *argv[]) {
 
         waiting_students = 0;
         total_requests = 0;
+        tutor_rr = 0;
 
         sem_init(&chair_mutex, 0, 1);
         sem_init(&q_mutex, 0, 1);
         sem_init(&queue_fill, 0, 0);
-        sem_init(&tutor_waiting, 0, 0);
         sem_init(&waiting_students_sem, 0, 1);
 
 #ifdef DEBUG
@@ -156,10 +158,13 @@ int main(int argc, char *argv[]) {
 #endif
 
         total_students = n;
+        total_tutors = m;
         stu_arr = (student *) malloc(n * sizeof(student));
         assert(stu_arr != NULL);
         student_sleeping = (sem_t *) malloc(n * sizeof(sem_t));
         assert(student_sleeping != NULL);
+        tutor_waiting = (sem_t *) malloc(m * sizeof(sem_t));
+        assert(tutor_waiting != NULL);
         coord_queue = (int *) malloc(total_chairs * sizeof(int));
         assert(coord_queue != NULL);
         student_thread = malloc(sizeof(pthread_t) * n);
@@ -170,6 +175,10 @@ int main(int argc, char *argv[]) {
 #ifdef DEBUG
         printf("stu_arr, student_sleeping, coord_queue, student_thread, tutor_thread malloc\n");
 #endif
+
+        for (i = 0; i < m; i++) {
+            sem_init(&tutor_waiting[i], 0, 0);
+        }
 
         //Create coordinator thread
         assert(pthread_create(&coord_thread, NULL, (void *(*)(void *)) coord_routine, NULL) == 0);
