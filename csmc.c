@@ -14,10 +14,10 @@
 #include <assert.h>
 #include <stdint.h>
 
-#define DEBUG
+//#define DEBUG
 
-sem_t chair_mutex, q_mutex, queue_fill, tutor_waiting;
-int total_chairs, max_help, chairs_avail, total_students;
+sem_t chair_mutex, q_mutex, queue_fill, tutor_waiting, waiting_students_sem;
+int total_chairs, max_help, chairs_avail, total_students, waiting_students, total_requests;
 
 /* For Student */
 typedef struct student {
@@ -48,9 +48,9 @@ void student_routine(int studentID) {
         if (curr_student->num_helps == max_help) {
             break;
         }
+        sem_wait(&chair_mutex);
         if (chairs_avail <= total_chairs && chairs_avail > 0) {
             // occupy chair
-            sem_wait(&chair_mutex);
             chairs_avail--;
             printf("S: Student %d takes a seat. Empty chairs = %d.\n", curr_student->student_ID, chairs_avail);
             sem_post(&chair_mutex);
@@ -69,6 +69,7 @@ void student_routine(int studentID) {
             sleep(2000);
 
         } else {
+            sem_post(&chair_mutex);
             //do programming
             // TODO: Random upto 2ms
             printf("S: Student %d found no empty chair. Will try again later.\n", curr_student->student_ID);
@@ -81,20 +82,20 @@ void student_routine(int studentID) {
 
 void tutor_routine(int id) {
 #ifdef DEBUG
-    printf("student_routine started for %d\n", id);
+    printf("tutor_routine started for %d\n", id);
 #endif
-/*
- * While(1){
-//Wait for Tutor PQ to be filled
-Wait(tutor_waiting)
 
-//Remove student with highest priority from MLPQ
-signal(student_sleeping[student_id])
-
-//Tutor student
-Sleep(0.2ms)
-
- */
+//    while (1) {
+//        //Wait for Tutor PQ to be filled
+//        sem_wait(&tutor_waiting);
+//
+//        //Remove student with highest priority from MLPQ
+//        sem_post(&student_sleeping[0]);
+//        printf("T: Student %d tutored by Tutor %d", 0, id);
+//
+//        //Tutor student
+//        sleep(2);
+//    }
 }
 
 void coord_routine() {
@@ -112,16 +113,18 @@ void coord_routine() {
         sem_post(&q_mutex);
 
         curr_student = &stu_arr[studentID];
-        sem_wait(&chair_mutex);
+        sem_wait(&waiting_students_sem);
         // TODO: Total requests
-        printf("C: Student %d with priority %d added to the queue. Waiting students now = %d. Total requests = 0\n",
-               curr_student->student_ID, curr_student->num_helps, total_chairs - chairs_avail);
-        sem_post(&chair_mutex);
+        waiting_students += 1;
+        total_requests += 1;
+        printf("C: Student %d with priority %d added to the queue. Waiting students now = %d. Total requests = %d\n",
+               curr_student->student_ID, curr_student->num_helps, waiting_students, total_requests);
+        sem_post(&waiting_students_sem);
         //Add student to Tutor MLPQ
         //MLPQ[curr_student.nhelps].addatend()
 
         //Notify tutor that student is waiting
-        //sem_post(tutor_waiting);
+        sem_post(&tutor_waiting);
     }
 }
 
@@ -139,10 +142,14 @@ int main(int argc, char *argv[]) {
         chairs_avail = total_chairs;
         max_help = atoi(argv[4]);
 
+        waiting_students = 0;
+        total_requests = 0;
+
         sem_init(&chair_mutex, 0, 1);
         sem_init(&q_mutex, 0, 1);
         sem_init(&queue_fill, 0, 0);
         sem_init(&tutor_waiting, 0, 0);
+        sem_init(&waiting_students_sem, 0, 1);
 
 #ifdef DEBUG
         printf("students: %d, tutors: %d, total_chairs: %d, max_help: %d\n", n, m, total_chairs, max_help);
@@ -177,7 +184,8 @@ int main(int argc, char *argv[]) {
         }
         //Create tutor threads
         for (j = 0; j < m; j++) {
-            assert(pthread_create(&tutor_thread[j], NULL, (void *(*)(void *)) tutor_routine, (void *) (uintptr_t) j) ==
+            assert(pthread_create(&tutor_thread[j], NULL, (void *(*)(void *)) tutor_routine,
+                                  (void *) (uintptr_t) j) ==
                    0);
         }
 
