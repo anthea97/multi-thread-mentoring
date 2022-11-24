@@ -26,6 +26,7 @@ int *MLPQ_rear;
 typedef struct student {
     int student_ID;
     int num_helps;
+    int tutored_by;
 } student;
 
 student *stu_arr;
@@ -60,11 +61,12 @@ void student_routine(int studentID) {
             printf("S: Student %d takes a seat. Empty chairs = %d.\n", curr_student->student_ID, chairs_avail);
             sem_post(&chair_mutex);
 
-            //add self to coordinator Queue
+            // add self to coordinator Queue
             sem_wait(&q_mutex);
             add(curr_student->student_ID);
             sem_post(&q_mutex);
-            //Inform coordinator that queue is not empty
+
+            // Inform coordinator that queue is not empty
             sem_post(&queue_fill);
 
             // wait to be woken up for tutoring
@@ -85,7 +87,7 @@ void student_routine(int studentID) {
             usleep(200);
 
             // Done with tutoring
-            printf("S: Student %d received help from Tutor %d.\n", curr_student->student_ID, 0);
+            printf("S: Student %d received help from Tutor %d.\n", curr_student->student_ID, curr_student->tutored_by);
         } else {
             sem_post(&chair_mutex);
             // Do programming
@@ -95,16 +97,18 @@ void student_routine(int studentID) {
     }
 }
 
-void tutor_routine(int id) {
+void tutor_routine(int tutorID) {
 #ifdef DEBUG
     printf("tutor_routine started for %d\n", id);
 #endif
     int curr_help_level, studentID;
-    while (1) {
-        //Wait for Tutor PQ to be filled
-        sem_wait(&tutor_waiting[id]);
+    student *curr_student;
 
-        //Remove student with the highest priority from MLPQ
+    while (1) {
+        // Wait for Tutor PQ to be filled
+        sem_wait(&tutor_waiting[tutorID]);
+
+        // Remove student with the highest priority from MLPQ
         sem_wait(&MLPQ_mutex);
         curr_help_level = 0;
         while (MLPQ_rear[curr_help_level] == MLPQ_front[curr_help_level] && curr_help_level < max_help) {
@@ -114,20 +118,25 @@ void tutor_routine(int id) {
         MLPQ_front[curr_help_level] += 1;
         sem_post(&MLPQ_mutex);
 
+        curr_student = &stu_arr[studentID];
+        curr_student->tutored_by = tutorID;
+
+        // Update count variables
         sem_wait(&students_tutored_now_mutex);
         students_tutored_now += 1;
-        total_sessions_tutored += 1;
         sem_post(&students_tutored_now_mutex);
 
+        // Wake up student
         sem_post(&student_sleeping[studentID]);
-        //Tutor student
+        // Tutor student
         usleep(200);
 
         // Done with tutoring the student
         sem_wait(&students_tutored_now_mutex);
         students_tutored_now -= 1;
+        total_sessions_tutored += 1;
         printf("T: Student %d tutored by Tutor %d. Students tutored now = %d. Total sessions tutored = %d.\n",
-               studentID, id, students_tutored_now, total_sessions_tutored);
+               studentID, tutorID, students_tutored_now, total_sessions_tutored);
         sem_post(&students_tutored_now_mutex);
     }
 }
@@ -151,7 +160,7 @@ void coord_routine() {
         sem_wait(&waiting_students_sem);
         waiting_students += 1;
         total_requests += 1;
-        printf("C: Student %d with priority %d added to the queue. Waiting students now = %d. Total requests = %d\n",
+        printf("C: Student %d with priority %d added to the queue. Waiting students now = %d. Total requests = %d.\n",
                curr_student->student_ID, curr_student->num_helps, waiting_students, total_requests);
         sem_post(&waiting_students_sem);
 

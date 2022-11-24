@@ -3,5 +3,5 @@ project(multi_thread_mentoring C)
 
 set(CMAKE_C_STANDARD 11)
 
-add_executable(multi_thread_mentoring
+add_executable(csmc
         csmc.c)
