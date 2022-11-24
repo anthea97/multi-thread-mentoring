@@ -308,9 +308,7 @@ int main(int argc, char *argv[]) {
         printf("Tutor threads joined\n");
 #endif
     } else {
-#ifdef DEBUG
-        printf("Wrong number of arguments");
-#endif
+        fprintf(stderr, "Wrong number of arguments");
         exit(-1);
     }
 
