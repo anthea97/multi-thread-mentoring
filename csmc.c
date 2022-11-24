@@ -13,7 +13,7 @@
 #include <stdint.h>
 
 // Uncomment for debug print statements
-#define DEBUG
+//#define DEBUG
 
 sem_t chair_mutex, q_mutex, queue_fill, waiting_students_mutex, MLPQ_mutex;
 sem_t students_tutored_now_mutex;
