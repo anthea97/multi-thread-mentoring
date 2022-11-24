@@ -12,17 +12,20 @@
 #include <assert.h>
 #include <stdint.h>
 
-//#define DEBUG
+// Uncomment for debug print statements
+#define DEBUG
 
-sem_t chair_mutex, q_mutex, queue_fill, waiting_students_sem, MLPQ_mutex;
+sem_t chair_mutex, q_mutex, queue_fill, waiting_students_mutex, MLPQ_mutex;
 sem_t students_tutored_now_mutex;
 int total_chairs, max_help, chairs_avail, total_students, waiting_students, total_requests, tutor_rr, total_tutors;
 int students_tutored_now, total_sessions_tutored;
+
+// For Multi-level priority queue
 int **MLPQ;
 int *MLPQ_front;
 int *MLPQ_rear;
 
-/* For Student */
+// For Student
 typedef struct student {
     int student_ID;
     int num_helps;
@@ -32,7 +35,7 @@ typedef struct student {
 student *stu_arr;
 sem_t *student_sleeping, *tutor_waiting;
 
-/* For Coordinator Queue */
+// For Coordinator Queue
 int rear = 0;
 int front = 0;
 int *coord_queue;
@@ -52,7 +55,6 @@ void student_routine(int studentID) {
         if (curr_student->num_helps == max_help) {
             // Exit the student thread
             pthread_exit(NULL);
-            break;
         }
         sem_wait(&chair_mutex);
         if (chairs_avail <= total_chairs && chairs_avail > 0) {
@@ -78,9 +80,9 @@ void student_routine(int studentID) {
             sem_post(&chair_mutex);
 
             // Not waiting anymore
-            sem_wait(&waiting_students_sem);
+            sem_wait(&waiting_students_mutex);
             waiting_students--;
-            sem_post(&waiting_students_sem);
+            sem_post(&waiting_students_mutex);
 
             // Once woken up, get tutored
             curr_student->num_helps++;
@@ -99,7 +101,7 @@ void student_routine(int studentID) {
 
 void tutor_routine(int tutorID) {
 #ifdef DEBUG
-    printf("tutor_routine started for %d\n", id);
+    printf("tutor_routine started for %d\n", tutorID);
 #endif
     int curr_help_level, studentID;
     student *curr_student;
@@ -149,6 +151,14 @@ void coord_routine() {
     int studentID, next_tutor;
 
     while (1) {
+        // If all requests are sent, kill the coordinator thread
+        sem_wait(&waiting_students_mutex);
+        if (total_requests == total_students * max_help) {
+            sem_post(&waiting_students_mutex);
+            pthread_exit(NULL);
+        }
+        sem_post(&waiting_students_mutex);
+
         //should wait for Queue to fill up
         sem_wait(&queue_fill);
         //Remove student from queue (FCFS)
@@ -157,12 +167,12 @@ void coord_routine() {
         sem_post(&q_mutex);
 
         curr_student = &stu_arr[studentID];
-        sem_wait(&waiting_students_sem);
+        sem_wait(&waiting_students_mutex);
         waiting_students += 1;
         total_requests += 1;
         printf("C: Student %d with priority %d added to the queue. Waiting students now = %d. Total requests = %d.\n",
                curr_student->student_ID, curr_student->num_helps, waiting_students, total_requests);
-        sem_post(&waiting_students_sem);
+        sem_post(&waiting_students_mutex);
 
         //Add student to Tutor MLPQ
         sem_wait(&MLPQ_mutex);
@@ -200,7 +210,7 @@ int main(int argc, char *argv[]) {
         sem_init(&chair_mutex, 0, 1);
         sem_init(&q_mutex, 0, 1);
         sem_init(&queue_fill, 0, 0);
-        sem_init(&waiting_students_sem, 0, 1);
+        sem_init(&waiting_students_mutex, 0, 1);
         sem_init(&MLPQ_mutex, 0, 1);
         sem_init(&students_tutored_now_mutex, 0, 1);
 
@@ -218,9 +228,9 @@ int main(int argc, char *argv[]) {
         assert(tutor_waiting != NULL);
         coord_queue = (int *) malloc(total_chairs * sizeof(int));
         assert(coord_queue != NULL);
-        student_thread = malloc(sizeof(pthread_t) * n);
+        student_thread = (pthread_t *) malloc(sizeof(pthread_t) * n);
         assert(student_thread != NULL);
-        tutor_thread = malloc(sizeof(pthread_t) * m);
+        tutor_thread = (pthread_t *) malloc(sizeof(pthread_t) * m);
         assert(tutor_thread != NULL);
 
         // MLPQ initialization
@@ -245,6 +255,12 @@ int main(int argc, char *argv[]) {
             sem_init(&tutor_waiting[i], 0, 0);
         }
 
+        //Create tutor threads
+        for (j = 0; j < m; j++) {
+            assert(pthread_create(&tutor_thread[j], NULL, (void *(*)(void *)) tutor_routine,
+                                  (void *) (uintptr_t) j) ==
+                   0);
+        }
         //Create coordinator thread
         assert(pthread_create(&coord_thread, NULL, (void *(*)(void *)) coord_routine, NULL) == 0);
         //Create student threads
@@ -256,12 +272,6 @@ int main(int argc, char *argv[]) {
             assert(pthread_create(&student_thread[i], NULL, (void *(*)(void *)) student_routine,
                                   (void *) (uintptr_t) i) == 0);
         }
-        //Create tutor threads
-        for (j = 0; j < m; j++) {
-            assert(pthread_create(&tutor_thread[j], NULL, (void *(*)(void *)) tutor_routine,
-                                  (void *) (uintptr_t) j) ==
-                   0);
-        }
 
         // Wait for student threads
         for (i = 0; i < n; i++) {
@@ -270,18 +280,18 @@ int main(int argc, char *argv[]) {
 #ifdef DEBUG
         printf("Student threads joined\n");
 #endif
-        // Wait for tutor threads
-        for (j = 0; j < m; j++) {
-            assert(pthread_join(tutor_thread[j], NULL) == 0);
-        }
-#ifdef DEBUG
-        printf("Tutor threads joined\n");
-#endif
         // Wait for coordinator thread
         assert(pthread_join(coord_thread, NULL) == 0);
 #ifdef DEBUG
         printf("Coordinator thread joined\n");
 #endif
+//        // Wait for tutor threads
+//        for (j = 0; j < m; j++) {
+//            assert(pthread_join(tutor_thread[j], NULL) == 0);
+//        }
+//#ifdef DEBUG
+//        printf("Tutor threads joined\n");
+//#endif
     } else {
 #ifdef DEBUG
         printf("Wrong number of arguments");
