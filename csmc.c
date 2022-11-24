@@ -7,11 +7,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
-//#include <sys/wait.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <assert.h>
+#include <stdint.h>
 
 #define DEBUG
 
@@ -62,7 +63,7 @@ void student_routine(int studentID) {
             sem_post(&queue_fill);
 
             // wait to be woken up for tutoring
-            sem_wait(student_sleeping[curr_student->student_ID]);
+            sem_wait(&student_sleeping[curr_student->student_ID]);
             //Once woken up, get tutored
             curr_student->num_helps++;
             sleep(2000);
