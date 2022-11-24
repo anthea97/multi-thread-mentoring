@@ -15,7 +15,9 @@
 //#define DEBUG
 
 sem_t chair_mutex, q_mutex, queue_fill, waiting_students_sem, MLPQ_mutex;
+sem_t students_tutored_now_mutex;
 int total_chairs, max_help, chairs_avail, total_students, waiting_students, total_requests, tutor_rr, total_tutors;
+int students_tutored_now, total_sessions_tutored;
 int **MLPQ;
 int *MLPQ_front;
 int *MLPQ_rear;
@@ -47,6 +49,8 @@ void student_routine(int studentID) {
 
     while (1) {
         if (curr_student->num_helps == max_help) {
+            // Exit the student thread
+            pthread_exit(NULL);
             break;
         }
         sem_wait(&chair_mutex);
@@ -79,10 +83,12 @@ void student_routine(int studentID) {
             // Once woken up, get tutored
             curr_student->num_helps++;
             usleep(200);
+
+            // Done with tutoring
+            printf("S: Student %d received help from Tutor %d.\n", curr_student->student_ID, 0);
         } else {
             sem_post(&chair_mutex);
-            //do programming
-            // TODO: Random upto 2ms
+            // Do programming
             printf("S: Student %d found no empty chair. Will try again later.\n", curr_student->student_ID);
             usleep(rand() % (2001));
         }
@@ -101,17 +107,28 @@ void tutor_routine(int id) {
         //Remove student with the highest priority from MLPQ
         sem_wait(&MLPQ_mutex);
         curr_help_level = 0;
-        while (MLPQ_rear[curr_help_level] == MLPQ_front[curr_help_level]) {
+        while (MLPQ_rear[curr_help_level] == MLPQ_front[curr_help_level] && curr_help_level < max_help) {
             curr_help_level += 1;
         }
         studentID = MLPQ[curr_help_level][MLPQ_front[curr_help_level]];
         MLPQ_front[curr_help_level] += 1;
         sem_post(&MLPQ_mutex);
 
-        printf("T: Student %d tutored by Tutor %d\n", studentID, id);
+        sem_wait(&students_tutored_now_mutex);
+        students_tutored_now += 1;
+        total_sessions_tutored += 1;
+        sem_post(&students_tutored_now_mutex);
+
         sem_post(&student_sleeping[studentID]);
         //Tutor student
         usleep(200);
+
+        // Done with tutoring the student
+        sem_wait(&students_tutored_now_mutex);
+        students_tutored_now -= 1;
+        printf("T: Student %d tutored by Tutor %d. Students tutored now = %d. Total sessions tutored = %d.\n",
+               studentID, id, students_tutored_now, total_sessions_tutored);
+        sem_post(&students_tutored_now_mutex);
     }
 }
 
@@ -168,12 +185,15 @@ int main(int argc, char *argv[]) {
         waiting_students = 0;
         total_requests = 0;
         tutor_rr = 0;
+        students_tutored_now = 0;
+        total_sessions_tutored = 0;
 
         sem_init(&chair_mutex, 0, 1);
         sem_init(&q_mutex, 0, 1);
         sem_init(&queue_fill, 0, 0);
         sem_init(&waiting_students_sem, 0, 1);
         sem_init(&MLPQ_mutex, 0, 1);
+        sem_init(&students_tutored_now_mutex, 0, 1);
 
 #ifdef DEBUG
         printf("students: %d, tutors: %d, total_chairs: %d, max_help: %d\n", n, m, total_chairs, max_help);
@@ -234,16 +254,25 @@ int main(int argc, char *argv[]) {
                    0);
         }
 
-        // Wait for coordinator thread
-        assert(pthread_join(coord_thread, NULL) == 0);
         // Wait for student threads
         for (i = 0; i < n; i++) {
             assert(pthread_join(student_thread[i], NULL) == 0);
         }
+#ifdef DEBUG
+        printf("Student threads joined\n");
+#endif
         // Wait for tutor threads
         for (j = 0; j < m; j++) {
             assert(pthread_join(tutor_thread[j], NULL) == 0);
         }
+#ifdef DEBUG
+        printf("Tutor threads joined\n");
+#endif
+        // Wait for coordinator thread
+        assert(pthread_join(coord_thread, NULL) == 0);
+#ifdef DEBUG
+        printf("Coordinator thread joined\n");
+#endif
     } else {
 #ifdef DEBUG
         printf("Wrong number of arguments");
