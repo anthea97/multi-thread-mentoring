@@ -320,21 +320,12 @@ int main(int argc, char *argv[]) {
 /* Coordinator Queue Helper Functions */
 
 void add(int studentID) {
-    student *st = &stu_arr[studentID];
-//#ifdef DEBUG
-//    printf("Inserting student %d in queue at position %d\n", st->student_ID, rear);
-//#endif
     coord_queue[rear] = studentID;
     rear = (rear + 1) % total_chairs;
 }
 
 int pop() {
     int studentID = coord_queue[front];
-    student *st = &stu_arr[studentID];
-
-//#ifdef DEBUG
-//    printf("Student deleted from queue is %d from position %d\n", st->student_ID, front);
-//#endif
     front = (front + 1) % total_chairs;
     return studentID;
 }
