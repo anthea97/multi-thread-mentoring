@@ -28,8 +28,8 @@ Once all the student threads are terminated, the tutor threads, the coordinator 
 1. We model the student i.e. Create a student structure with attributes like student ID, #helps(priority), etc.
 2. We use two shared data structures:
     
-    One shared between Student and Coordinator - A queue
+    One shared between Student and Coordinator - A simple queue
 
-    One shared between Coordinator and Tutor - ??
+    One shared between Coordinator and Tutor - a multi-level queue, one level for each priority (or number of helps received)
 
 ![](Drawing.png)
